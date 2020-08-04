@@ -10,7 +10,8 @@ type Config struct {
 }
 
 type WebConfig struct {
-	StaticDir map[string]string
+	AutoRender bool
+	StaticDir  map[string]string
 }
 
 func init() {
@@ -22,6 +23,7 @@ func newConfig() *Config {
 		AppName: "beego",
 		WebConfig: WebConfig {
 			StaticDir: map[string]string{"/static": "static"},
+			AutoRender: true,
 		},
 	}
 }

@@ -1,12 +1,16 @@
 package main
 
 import (
+	"beego"
+	"beego-demo/controllers"
 	"fmt"
 	"regexp"
 )
 
 func main() {
-	regexDemo()
+	beego.Router("/", &controllers.MainController{})
+	beego.Router("/data", &controllers.DataController{})
+	beego.Run()
 }
 
 func demoDefer() {

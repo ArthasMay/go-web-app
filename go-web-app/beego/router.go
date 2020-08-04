@@ -1,11 +1,13 @@
 package beego
 
 import (
-	"fmt"
+	"beego/context"
 	"net/http"
+	"net/url"
 	"reflect"
 	"regexp"
 	"strings"
+	"time"
 )
 
 type controllerInfo struct {
@@ -14,12 +16,17 @@ type controllerInfo struct {
 	controllerType reflect.Type
 }
 
-type ControllerRegistor struct {
-	routers     []*controllerInfo
-	Application *App
+type ControllerRegister struct {
+	routers []*controllerInfo
 }
 
-func (p *ControllerRegistor) Add(pattern string, c ControllerIntrerface) {
+func NewControllerRegister() *ControllerRegister {
+	return &ControllerRegister{
+		routers: []*controllerInfo{},
+	}
+}
+
+func (p *ControllerRegister) Add(pattern string, c ControllerIntrerface) {
 	parts := strings.Split(pattern, "/")
 
 	j := 0
@@ -58,20 +65,9 @@ func (p *ControllerRegistor) Add(pattern string, c ControllerIntrerface) {
 
 var RecoverPanic = false
 
-func (p *ControllerRegistor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-
-	// defer func() {
-	// 	if err := recover(); err != nil {
-	// 		if !RecoverPanic {
-	// 			panic(err)
-	// 		} else {
-	// 			Critical()
-	// 		}
-	// 	}
-	// }()
+func (p *ControllerRegister) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var started bool
-	fmt.Println(started)
 	for prefix, staticDir := range BConfig.WebConfig.StaticDir {
 		if strings.HasPrefix(r.URL.Path, prefix) {
 			file := staticDir + r.URL.Path[len(prefix):]
@@ -90,7 +86,7 @@ func (p *ControllerRegistor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !route.regex.MatchString(requestPath) {
 			continue
 		}
-		
+
 		// get submatches()
 		matches := route.regex.FindStringSubmatch(requestPath)
 
@@ -98,8 +94,69 @@ func (p *ControllerRegistor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if len(matches[0]) != len(requestPath) {
 			continue
 		}
-		
 
+		params := make(map[string]string)
+		if len(route.params) > 0 {
+			// add url parameters to the query param map
+			values := r.URL.Query()
+
+			for i, match := range matches[1:] {
+				values.Add(route.params[i], match)
+				params[route.params[i]] = match
+			}
+			// reassemble query params and add to RawQuery
+			r.URL.RawQuery = url.Values(values).Encode() + "&" + r.URL.RawQuery
+		}
+
+		// Invoke the request handler
+		vc := reflect.New(route.controllerType)
+		init := vc.MethodByName("Init")
+		in := make([]reflect.Value, 2)
+		ct := &context.Context{ResponseWriter: &context.Response{ResponseWriter: w, Started: true, Status: 200, Elapsed: time.Duration(10)}, Request: r, Output: context.NewOutput()}
+		ct.Reset(w, r)
+		in[0] = reflect.ValueOf(ct)
+		in[1] = reflect.ValueOf(route.controllerType.Name())
+		init.Call(in)
+		in = make([]reflect.Value, 0)
+		method := vc.MethodByName("Prepare")
+		method.Call(in)
+		if r.Method == "GET" {
+			method = vc.MethodByName("Get")
+			method.Call(in)
+		} else if r.Method == "POST" {
+			method = vc.MethodByName("Post")
+			method.Call(in)
+		} else if r.Method == "HEAD" {
+			method = vc.MethodByName("Head")
+			method.Call(in)
+		} else if r.Method == "DELETE" {
+			method = vc.MethodByName("Delete")
+			method.Call(in)
+		} else if r.Method == "PUT" {
+			method = vc.MethodByName("Put")
+			method.Call(in)
+		} else if r.Method == "PATCH" {
+			method = vc.MethodByName("Patch")
+			method.Call(in)
+		} else if r.Method == "OPTIONS" {
+			method = vc.MethodByName("Options")
+			method.Call(in)
+		}
+
+		if !ct.ResponseWriter.Started && ct.ResponseWriter.Status == 0 {
+			if BConfig.WebConfig.AutoRender {
+				method = vc.MethodByName("Render")
+				method.Call(in)
+			}
+		}
+
+		method = vc.MethodByName("Finish")
+		method.Call(in)
+		started = true
+		break
 	}
 
+	if started == false {
+		http.NotFound(w, r)
+	}
 }
